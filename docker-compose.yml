@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # 🌐 Backend FastAPI Service
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: birlab-ai-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # AI Provider API Keys - Set these in your .env file
+      - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - COHERE_API_KEY=${COHERE_API_KEY}
+      - HUGGINGFACE_API_KEY=${HUGGINGFACE_API_KEY}
+      - MISTRAL_API_KEY=${MISTRAL_API_KEY}
+      - TOGETHER_API_KEY=${TOGETHER_API_KEY}
+      - REPLICATE_API_TOKEN=${REPLICATE_API_TOKEN}
+      - GROK_API_KEY=${GROK_API_KEY}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - AI21_API_KEY=${AI21_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - FIREWORKS_API_KEY=${FIREWORKS_API_KEY}
+      # App Configuration
+      - PYTHONPATH=/app
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./multi_agent_system:/app/multi_agent_system
+      - ./backend:/app/backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ai-network
+
+  # 🎨 Frontend React Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_API_URL=http://localhost:8000
+    container_name: birlab-ai-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+      - NODE_ENV=production
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-network
+
+  # 🔄 Nginx Reverse Proxy (Optional - for production)
+  nginx:
+    image: nginx:alpine
+    container_name: birlab-ai-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - backend
+      - frontend
+    restart: unless-stopped
+    networks:
+      - ai-network
+    profiles:
+      - production
+
+networks:
+  ai-network:
+    driver: bridge
+    name: birlab-ai-network
+
+volumes:
+  # Optional volumes for data persistence
+  agent_data:
+    name: birlab-ai-data
+  logs:
+    name: birlab-ai-logs 

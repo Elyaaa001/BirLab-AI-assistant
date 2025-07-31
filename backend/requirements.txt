@@ -1,0 +1,56 @@
+# BirLab AI - FastAPI Backend Dependencies
+
+# Core FastAPI dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+websockets>=12.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+
+# HTTP client and async
+aiohttp>=3.8.0
+httpx>=0.25.0
+
+# Data validation and serialization
+pydantic>=2.0.0
+
+# Database (optional - uncomment if needed)
+# sqlalchemy>=2.0.0
+# databases[postgresql]>=0.8.0
+# alembic>=1.12.0
+
+# Caching (optional - uncomment if needed)
+# redis>=5.0.0
+
+# Authentication (optional - uncomment if needed)
+# python-jose[cryptography]>=3.3.0
+# passlib[bcrypt]>=1.7.4
+
+# Monitoring and logging
+structlog>=23.0.0
+
+# Development and testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0
+
+# Core AI Multi-Agent System dependencies (from main requirements.txt)
+asyncio-throttle>=1.0.2
+typing-extensions>=4.5.0
+
+# Optional AI provider dependencies - uncomment as needed
+# google-generativeai>=0.3.0  # For Gemini
+# openai>=1.3.0               # For OpenAI GPT
+# anthropic>=0.7.0            # For Claude
+# cohere>=4.30.0              # For Cohere
+# mistralai>=0.0.8            # For Mistral
+# groq>=0.4.0                 # For Groq
+# ai21>=2.0.0                 # For AI21
+# transformers>=4.30.0        # For Hugging Face
+# together>=0.2.7             # For Together AI
+# replicate>=0.15.0           # For Replicate
+
+# Production WSGI server (optional)
+gunicorn>=21.2.0 

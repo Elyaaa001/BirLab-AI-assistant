@@ -1,0 +1,63 @@
+# Core async dependencies
+aiohttp>=3.8.0
+asyncio-throttle>=1.0.2
+typing-extensions>=4.5.0
+
+# Environment configuration
+python-dotenv>=1.0.0
+
+# Optional dependencies for specific AI services
+# Uncomment the ones you plan to use:
+
+# OpenAI (GPT models)
+# openai>=1.3.0
+
+# Anthropic (Claude models)  
+# anthropic>=0.7.0
+
+# Google AI (Gemini/PaLM)
+# google-generativeai>=0.3.0
+
+# Cohere (Command models)
+# cohere>=4.30.0
+
+# Hugging Face (thousands of models)
+# transformers>=4.30.0
+# torch>=2.0.0  # For local inference if needed
+
+# Mistral AI
+# mistralai>=0.0.8
+
+# Together AI
+# together>=0.2.7
+
+# Replicate
+# replicate>=0.15.0
+
+# Grok (xAI)
+# No specific client needed, uses HTTP API
+
+# Perplexity AI  
+# No specific client needed, uses HTTP API
+
+# AI21 Labs (Jamba/Jurassic)
+# ai21>=2.0.0
+
+# Groq (Ultra-fast inference)
+# groq>=0.4.0
+
+# Fireworks AI
+# No specific client needed, uses HTTP API
+
+# Ollama (local models) - requires Ollama server running
+# No additional Python packages needed, uses HTTP API
+
+# Development and testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# Logging and monitoring (optional)
+structlog>=23.0.0
+
+# For better async performance (optional)
+uvloop>=0.17.0; sys_platform != "win32" 
