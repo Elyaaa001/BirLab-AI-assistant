@@ -17,7 +17,7 @@ def create_env_file():
 
 # ===== GOOGLE AI (GEMINI) - START HERE! ===== 🌟
 # Get your key from: https://aistudio.google.com/app/apikey
-#GOOGLE_AI_API_KEY=your-google-ai-api-key-here
+#GOOGLE_AI_API_KEY=AIzaSyD-GFjjs0gZ1gpZKX0Wa0c8MWLUrb95sXE
 
 # ===== OTHER AI PROVIDERS (Optional) =====
 

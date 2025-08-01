@@ -12,31 +12,9 @@ const api = axios.create({
   },
 });
 
-// Agent icons mapping
-const AGENT_ICONS = {
-  gemini_pro: '🧠',
-  gemini_flash: '⚡',
-  gemini_vision: '👁️',
-  gemini_coder: '💻',
-  gemini_researcher: '📚',
-  gpt4: '🤖',
-  claude: '🎨'
-};
-
-// Agent colors
-const AGENT_COLORS = {
-  gemini_pro: '#4285f4',
-  gemini_flash: '#ea4335',
-  gemini_vision: '#34a853',
-  gemini_coder: '#fbbc04',
-  gemini_researcher: '#9c27b0',
-  gpt4: '#10a37f',
-  claude: '#d4a574'
-};
-
 function App() {
   const [agents, setAgents] = useState([]);
-  const [selectedAgent, setSelectedAgent] = useState('gemini_pro');
+  const [selectedAgent, setSelectedAgent] = useState('birlab_ollama_llama3_8b');
   const [messages, setMessages] = useState([]);
   const [currentMessage, setCurrentMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -46,25 +24,31 @@ function App() {
   const [imagePreview, setImagePreview] = useState(null);
   const [taskDescription, setTaskDescription] = useState('');
   const [taskResult, setTaskResult] = useState(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
-  // Load agents and system status on mount
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
   useEffect(() => {
     loadAgents();
     loadSystemStatus();
   }, []);
 
-  // Auto-scroll to bottom of messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
   const loadAgents = async () => {
     try {
       const response = await api.get('/agents');
       setAgents(response.data);
-      if (response.data.length > 0 && !response.data.find(a => a.id === selectedAgent)) {
-        setSelectedAgent(response.data[0].id);
+      if (response.data.length > 0 && !response.data.find(a => a.agent_id === selectedAgent)) {
+        // Prefer Ollama models since they're working, otherwise use first available
+        const preferredAgent = response.data.find(a => a.provider === 'ollama') || response.data[0];
+        setSelectedAgent(preferredAgent.agent_id);
       }
     } catch (error) {
       console.error('Failed to load agents:', error);
@@ -98,7 +82,7 @@ function App() {
     try {
       const response = await api.post('/chat', {
         message: currentMessage,
-        agent_type: selectedAgent,
+        agent_id: selectedAgent,
         temperature: 0.7,
         max_tokens: 2048
       });
@@ -107,10 +91,18 @@ function App() {
         id: Date.now() + 1,
         text: response.data.response,
         sender: 'agent',
-        agent: response.data.agent,
-        agent_type: response.data.agent_type,
-        execution_time: response.data.execution_time,
-        timestamp: new Date().toLocaleTimeString()
+        agent: response.data.agent_used,
+        agent_type: response.data.agent_used,
+        timestamp: new Date().toLocaleTimeString(),
+        // Response Analysis Data
+        response_time: response.data.response_time || 0,
+        response_length_words: response.data.response_length_words || 0,
+        response_length_chars: response.data.response_length_chars || 0,
+        quality_score: response.data.quality_score || 0,
+        readability_score: response.data.readability_score || 0,
+        sentiment_score: response.data.sentiment_score || 0,
+        analysis: response.data.analysis || {},
+        model_info: response.data.model_info || {}
       };
 
       setMessages(prev => [...prev, agentMessage]);
@@ -128,466 +120,357 @@ function App() {
     }
   };
 
-  const executeTask = async (e) => {
-    e.preventDefault();
-    if (!taskDescription.trim() || isLoading) return;
-
-    setIsLoading(true);
-    setTaskResult(null);
-
-    try {
-      const response = await api.post('/task', {
-        description: taskDescription,
-        task_type: 'general',
-        priority: 'MEDIUM',
-        context: {},
-        preferred_agent: selectedAgent
-      });
-
-      setTaskResult({
-        success: true,
-        result: response.data.result,
-        agent_used: response.data.agent_used,
-        execution_time: response.data.execution_time,
-        task_id: response.data.task_id
-      });
-    } catch (error) {
-      console.error('Task execution error:', error);
-      setTaskResult({
-        success: false,
-        error: error.response?.data?.detail || error.message
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleImageUpload = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onload = (e) => setImagePreview(e.target.result);
-      reader.readAsDataURL(file);
-    }
-  };
-
-  const analyzeImage = async () => {
-    if (!imageFile || isLoading) return;
-
-    setIsLoading(true);
-    setTaskResult(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('image', imageFile);
-      formData.append('text', taskDescription || 'Analyze this image in detail');
-
-      const response = await api.post('/multimodal', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      setTaskResult({
-        success: true,
-        result: response.data.analysis,
-        agent_used: response.data.agent,
-        filename: response.data.filename,
-        image_size: response.data.image_size
-      });
-    } catch (error) {
-      console.error('Image analysis error:', error);
-      setTaskResult({
-        success: false,
-        error: error.response?.data?.detail || error.message
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const clearChat = () => {
+  const startNewChat = () => {
     setMessages([]);
+    setActiveTab('chat');
   };
 
-  const getAgentIcon = (agentType) => AGENT_ICONS[agentType] || '🤖';
-  const getAgentColor = (agentType) => AGENT_COLORS[agentType] || '#6b7280';
+  const getAgentIcon = (agentId) => {
+    if (!agentId) return '🤖';
+    if (agentId.includes('gemini')) return '🧠';
+    if (agentId.includes('ollama')) return '🦙';
+    if (agentId.includes('cohere')) return '⚔️';
+    return '🤖';
+  };
 
   return (
     <div className="app">
-      {/* Header */}
-      <header className="header">
-        <div className="header-content">
-          <div className="header-left">
-            <h1>🌟 BirLab AI</h1>
-            <p>Ultimate coordination of 14+ AI providers</p>
+      {/* Sidebar */}
+      <div className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="sidebar-header">
+          <button className="new-chat-btn" onClick={startNewChat}>
+            <span className="icon">💬</span>
+            <span className="text">New chat</span>
+          </button>
+          <button 
+            className="collapse-btn"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          >
+            <span className="icon">{sidebarCollapsed ? '→' : '←'}</span>
+          </button>
+        </div>
+
+        <nav className="sidebar-nav">
+          <div className="nav-section">
+            <button 
+              className={`nav-item ${activeTab === 'chat' ? 'active' : ''}`}
+              onClick={() => setActiveTab('chat')}
+            >
+              <span className="icon">💬</span>
+              <span className="text">Chat</span>
+            </button>
           </div>
-          <div className="header-right">
+
+          <div className="nav-section">
+            <button 
+              className={`nav-item ${activeTab === 'prompts' ? 'active' : ''}`}
+              onClick={() => setActiveTab('prompts')}
+            >
+              <span className="icon">☀️</span>
+              <span className="text">Prompts</span>
+            </button>
+            <button 
+              className={`nav-item ${activeTab === 'assistants' ? 'active' : ''}`}
+              onClick={() => setActiveTab('assistants')}
+            >
+              <span className="icon">🤖</span>
+              <span className="text">Assistants</span>
+            </button>
+            <button 
+              className={`nav-item ${activeTab === 'files' ? 'active' : ''}`}
+              onClick={() => setActiveTab('files')}
+            >
+              <span className="icon">📁</span>
+              <span className="text">Files</span>
+            </button>
+            <button 
+              className={`nav-item ${activeTab === 'plugins' ? 'active' : ''}`}
+              onClick={() => setActiveTab('plugins')}
+            >
+              <span className="icon">🧩</span>
+              <span className="text">Plugins</span>
+            </button>
+            <button 
+              className={`nav-item ${activeTab === 'models' ? 'active' : ''}`}
+              onClick={() => setActiveTab('models')}
+            >
+              <span className="icon">✨</span>
+              <span className="text">Models</span>
+            </button>
+            <button 
+              className={`nav-item ${activeTab === 'split-view' ? 'active' : ''}`}
+              onClick={() => setActiveTab('split-view')}
+            >
+              <span className="icon">⊞</span>
+              <span className="text">Split view</span>
+            </button>
+          </div>
+        </nav>
+
+        <div className="sidebar-search">
+          <div className="search-container">
+            <span className="search-icon">🔍</span>
+            <input 
+              type="text" 
+              placeholder="Search chats" 
+              className="search-input"
+            />
+          </div>
+        </div>
+
+        <div className="sidebar-footer">
+          <div className="system-status">
             {systemStatus && (
-              <div className="system-status">
+              <div className="status-info">
                 <div className="status-item">
-                  <span className="status-label">Agents:</span>
-                  <span className="status-value">{systemStatus.active_agents}</span>
+                  <span className="label">Agents:</span>
+                  <span className="value">{systemStatus.total_agents}</span>
                 </div>
                 <div className="status-item">
-                  <span className="status-label">Tasks:</span>
-                  <span className="status-value">{systemStatus.completed_tasks}</span>
-                </div>
-                <div className="status-item">
-                  <span className="status-label">Uptime:</span>
-                  <span className="status-value">{Math.round(systemStatus.uptime_seconds)}s</span>
+                  <span className="label">Providers:</span>
+                  <span className="value">{systemStatus.active_providers}</span>
                 </div>
               </div>
             )}
           </div>
         </div>
-      </header>
+      </div>
 
-      {/* Navigation */}
-      <nav className="nav-tabs">
-        <button 
-          className={`nav-tab ${activeTab === 'chat' ? 'active' : ''}`}
-          onClick={() => setActiveTab('chat')}
-        >
-          💬 Chat
-        </button>
-        <button 
-          className={`nav-tab ${activeTab === 'tasks' ? 'active' : ''}`}
-          onClick={() => setActiveTab('tasks')}
-        >
-          🎯 Tasks
-        </button>
-                    <button 
-              className={`nav-tab ${activeTab === 'vision' ? 'active' : ''}`}
-              onClick={() => setActiveTab('vision')}
-            >
-              👁️ Vision
-            </button>
-            <button 
-              className={`nav-tab ${activeTab === 'split-view' ? 'active' : ''}`}
-              onClick={() => setActiveTab('split-view')}
-            >
-              🔀 Split View
-            </button>
-            <button 
-              className={`nav-tab ${activeTab === 'agents' ? 'active' : ''}`}
-              onClick={() => setActiveTab('agents')}
-            >
-              🤖 Agents
-            </button>
-      </nav>
-
-      <main className="main-content">
-        {/* Agent Selector */}
-        <div className="agent-selector">
-          <label htmlFor="agent-select">Select AI Agent:</label>
-          <select 
-            id="agent-select"
-            value={selectedAgent} 
-            onChange={(e) => setSelectedAgent(e.target.value)}
-            className="agent-select"
-          >
-            {agents.map(agent => (
-              <option key={agent.id} value={agent.id}>
-                {getAgentIcon(agent.id)} {agent.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Chat Tab */}
+      {/* Main Content */}
+      <div className="main-content">
         {activeTab === 'chat' && (
           <div className="chat-container">
-            <div className="chat-messages">
-              {messages.length === 0 && (
-                <div className="welcome-message">
-                  <h3>Welcome to BirLab AI Chat! 🌟</h3>
-                  <p>Select an AI agent and start chatting. Each agent has unique capabilities:</p>
-                  <ul>
-                    <li>🧠 <strong>Gemini Pro</strong>: 2M token context, advanced reasoning</li>
-                    <li>⚡ <strong>Gemini Flash</strong>: Lightning-fast responses</li>
-                    <li>👁️ <strong>Gemini Vision</strong>: Image understanding</li>
-                    <li>💻 <strong>Gemini Coder</strong>: Programming specialist</li>
-                    <li>📚 <strong>Gemini Researcher</strong>: Research and analysis</li>
-                  </ul>
-                </div>
-              )}
-
-              {messages.map(message => (
-                <div key={message.id} className={`message ${message.sender}`}>
-                  <div className="message-header">
-                    <span className="message-sender">
-                      {message.sender === 'user' ? '👤 You' : 
-                       message.sender === 'error' ? '❌ Error' :
-                       `${getAgentIcon(message.agent_type)} ${message.agent}`}
-                    </span>
-                    <span className="message-time">{message.timestamp}</span>
-                    {message.execution_time && (
-                      <span className="execution-time">
-                        ⚡ {message.execution_time.toFixed(2)}s
-                      </span>
-                    )}
+            {messages.length === 0 ? (
+              <div className="welcome-screen">
+                <div className="logo-container">
+                  <div className="logo">
+                    <span className="logo-text">birlab</span>
+                    <span className="logo-suffix">ai</span>
                   </div>
-                  <div className="message-content">
-                    {message.text}
+                </div>
+                <h1 className="welcome-title">Hello, User!</h1>
+                <p className="welcome-subtitle">How can I help you today?</p>
+                
+                <div className="agent-selector-welcome">
+                  <label>Choose your AI:</label>
+                  <select 
+                    value={selectedAgent} 
+                    onChange={(e) => setSelectedAgent(e.target.value)}
+                    className="agent-select"
+                  >
+                    {agents.map(agent => (
+                      <option key={agent.agent_id} value={agent.agent_id}>
+                        {agent.name.replace(/[🧠⚡🌟👁️🚀🌴💬💻🔧🔍🎨🎵⚔️💡🌙🔄➕🔗🦙🦅🤖🔥🐦🐋🧙🐬🔍🤿🎩⚖️]/g, '').trim()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <div className="messages-container">
+                {messages.map(message => (
+                  <div key={message.id} className={`message-wrapper ${message.sender}`}>
+                    <div className="message-content">
+                      <div className="message-header">
+                        <span className="message-sender">
+                          {message.sender === 'user' ? 'You' : 'BirLab AI'}
+                        </span>
+                        {message.response_time && (
+                          <span className="message-time">
+                            {message.response_time.toFixed(2)}s
+                          </span>
+                        )}
+                      </div>
+                      <div className="message-text">
+                        {message.text}
+                      </div>
+                      
+                      {/* Response Analysis */}
+                      {message.sender === 'agent' && message.analysis && (
+                        <div className="response-analysis">
+                          <div className="analysis-toggle">
+                            <button 
+                              className="toggle-btn"
+                              onClick={(e) => {
+                                const details = e.target.closest('.response-analysis').querySelector('.analysis-details');
+                                details.style.display = details.style.display === 'none' ? 'block' : 'none';
+                              }}
+                            >
+                              📊 Analysis
+                            </button>
+                          </div>
+                          
+                          <div className="analysis-details" style={{display: 'none'}}>
+                            <div className="quick-metrics">
+                              <div className="metric">
+                                <span className="metric-label">Quality</span>
+                                <span className="metric-value">{Math.round((message.quality_score || 0) * 100)}%</span>
+                              </div>
+                              <div className="metric">
+                                <span className="metric-label">Speed</span>
+                                <span className="metric-value">{message.response_time?.toFixed(2)}s</span>
+                              </div>
+                              <div className="metric">
+                                <span className="metric-label">Words</span>
+                                <span className="metric-value">{message.response_length_words}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                
+                {isLoading && (
+                  <div className="message-wrapper agent">
+                    <div className="message-content">
+                      <div className="message-header">
+                        <span className="message-sender">BirLab AI</span>
+                      </div>
+                      <div className="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+
+            {/* Input Area */}
+            <div className="input-area">
+              <form onSubmit={sendMessage} className="message-form">
+                <div className="input-container">
+                  <input
+                    type="text"
+                    value={currentMessage}
+                    onChange={(e) => setCurrentMessage(e.target.value)}
+                    placeholder="Ask anything..."
+                    className="message-input"
+                    disabled={isLoading}
+                  />
+                  <button 
+                    type="submit" 
+                    className="send-button"
+                    disabled={isLoading || !currentMessage.trim()}
+                  >
+                    <span className="send-icon">↑</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'models' && (
+          <div className="models-container">
+            <h2>Available AI Models</h2>
+            <div className="models-grid">
+              {agents.map(agent => (
+                <div key={agent.agent_id} className="model-card">
+                  <div className="model-header">
+                    <h3>{agent.name.replace(/[🧠⚡🌟👁️🚀🌴💬💻🔧🔍🎨🎵⚔️💡🌙🔄➕🔗🦙🦅🤖🔥🐦🐋🧙🐬🔍🤿🎩⚖️]/g, '').trim()}</h3>
+                    <span className="provider">{agent.provider}</span>
+                  </div>
+                  <div className="model-info">
+                    <p>Context: {agent.context_length?.toLocaleString() || 'N/A'} tokens</p>
+                    <p>Capabilities: {agent.capabilities?.join(', ') || 'General'}</p>
                   </div>
                 </div>
               ))}
-
-              {isLoading && (
-                <div className="message agent loading">
-                  <div className="message-header">
-                    <span className="message-sender">
-                      {getAgentIcon(selectedAgent)} {agents.find(a => a.id === selectedAgent)?.name || 'AI Agent'}
-                    </span>
-                  </div>
-                  <div className="message-content">
-                    <div className="typing-indicator">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                  </div>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
             </div>
-
-            <form onSubmit={sendMessage} className="chat-input-form">
-              <div className="chat-input-container">
-                <input
-                  type="text"
-                  value={currentMessage}
-                  onChange={(e) => setCurrentMessage(e.target.value)}
-                  placeholder="Type your message..."
-                  className="chat-input"
-                  disabled={isLoading}
-                />
-                <button 
-                  type="submit" 
-                  className="send-button"
-                  disabled={isLoading || !currentMessage.trim()}
-                >
-                  {isLoading ? '⏳' : '🚀'}
-                </button>
-                <button 
-                  type="button" 
-                  onClick={clearChat}
-                  className="clear-button"
-                  title="Clear chat"
-                >
-                  🗑️
-                </button>
-              </div>
-            </form>
           </div>
         )}
 
-        {/* Tasks Tab */}
-        {activeTab === 'tasks' && (
-          <div className="tasks-container">
-            <h2>🎯 Complex Task Execution</h2>
-            <p>Execute complex tasks using the AI coordinator system</p>
-
-            <form onSubmit={executeTask} className="task-form">
-              <div className="form-group">
-                <label htmlFor="task-description">Task Description:</label>
-                <textarea
-                  id="task-description"
-                  value={taskDescription}
-                  onChange={(e) => setTaskDescription(e.target.value)}
-                  placeholder="Describe the task you want to execute..."
-                  className="task-textarea"
-                  rows={4}
-                  disabled={isLoading}
-                />
+        {activeTab === 'prompts' && (
+          <div className="feature-container">
+            <div className="feature-content">
+              <h2>Prompts</h2>
+              <p>Create and manage your custom prompts for better AI interactions.</p>
+              <div className="coming-soon">
+                <span className="icon">🚧</span>
+                <h3>Coming Soon</h3>
+                <p>This feature is currently under development. You'll be able to:</p>
+                <ul>
+                  <li>Save frequently used prompts</li>
+                  <li>Create prompt templates</li>
+                  <li>Share prompts with your team</li>
+                  <li>Browse community prompts</li>
+                </ul>
               </div>
-
-              <button 
-                type="submit" 
-                className="execute-button"
-                disabled={isLoading || !taskDescription.trim()}
-              >
-                {isLoading ? '⏳ Executing...' : '🚀 Execute Task'}
-              </button>
-            </form>
-
-            {taskResult && (
-              <div className={`task-result ${taskResult.success ? 'success' : 'error'}`}>
-                <div className="result-header">
-                  <h3>
-                    {taskResult.success ? '✅ Task Completed' : '❌ Task Failed'}
-                  </h3>
-                  {taskResult.success && (
-                    <div className="result-meta">
-                      <span>Agent: {taskResult.agent_used}</span>
-                      <span>Time: {taskResult.execution_time?.toFixed(2)}s</span>
-                      {taskResult.task_id && <span>ID: {taskResult.task_id.slice(0, 8)}</span>}
-                    </div>
-                  )}
-                </div>
-                <div className="result-content">
-                  {taskResult.success ? taskResult.result : taskResult.error}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Vision Tab */}
-        {activeTab === 'vision' && (
-          <div className="vision-container">
-            <h2>👁️ Multimodal Vision Analysis</h2>
-            <p>Upload an image and ask questions about it using Gemini Vision</p>
-
-            <div className="vision-form">
-              <div className="form-group">
-                <label htmlFor="image-upload">Upload Image:</label>
-                <input
-                  id="image-upload"
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="file-input"
-                />
-              </div>
-
-              {imagePreview && (
-                <div className="image-preview">
-                  <img src={imagePreview} alt="Preview" className="preview-image" />
-                </div>
-              )}
-
-              <div className="form-group">
-                <label htmlFor="image-question">Question about the image:</label>
-                <input
-                  id="image-question"
-                  type="text"
-                  value={taskDescription}
-                  onChange={(e) => setTaskDescription(e.target.value)}
-                  placeholder="What do you want to know about this image?"
-                  className="image-question-input"
-                  disabled={isLoading}
-                />
-              </div>
-
-              <button 
-                onClick={analyzeImage}
-                className="analyze-button"
-                disabled={isLoading || !imageFile}
-              >
-                {isLoading ? '⏳ Analyzing...' : '🔍 Analyze Image'}
-              </button>
             </div>
-
-            {taskResult && (
-              <div className={`task-result ${taskResult.success ? 'success' : 'error'}`}>
-                <div className="result-header">
-                  <h3>
-                    {taskResult.success ? '✅ Analysis Complete' : '❌ Analysis Failed'}
-                  </h3>
-                  {taskResult.success && (
-                    <div className="result-meta">
-                      <span>Agent: {taskResult.agent_used}</span>
-                      {taskResult.filename && <span>File: {taskResult.filename}</span>}
-                      {taskResult.image_size && <span>Size: {(taskResult.image_size / 1024).toFixed(1)}KB</span>}
-                    </div>
-                  )}
-                </div>
-                <div className="result-content">
-                  {taskResult.success ? taskResult.result : taskResult.error}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
-        {/* Split View Tab */}
+        {activeTab === 'assistants' && (
+          <div className="feature-container">
+            <div className="feature-content">
+              <h2>Assistants</h2>
+              <p>Create custom AI assistants with specialized knowledge and capabilities.</p>
+              <div className="coming-soon">
+                <span className="icon">🚧</span>
+                <h3>Coming Soon</h3>
+                <p>This feature is currently under development. You'll be able to:</p>
+                <ul>
+                  <li>Create custom AI assistants</li>
+                  <li>Upload knowledge bases</li>
+                  <li>Define assistant personalities</li>
+                  <li>Share assistants with others</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'files' && (
+          <div className="feature-container">
+            <div className="feature-content">
+              <h2>Files</h2>
+              <p>Upload and manage files for AI analysis and processing.</p>
+              <div className="coming-soon">
+                <span className="icon">🚧</span>
+                <h3>Coming Soon</h3>
+                <p>This feature is currently under development. You'll be able to:</p>
+                <ul>
+                  <li>Upload documents, images, and data files</li>
+                  <li>Analyze files with AI models</li>
+                  <li>Extract insights from documents</li>
+                  <li>Process multiple files at once</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'plugins' && (
+          <div className="feature-container">
+            <div className="feature-content">
+              <h2>Plugins</h2>
+              <p>Extend BirLab AI functionality with powerful plugins and integrations.</p>
+              <div className="coming-soon">
+                <span className="icon">🚧</span>
+                <h3>Coming Soon</h3>
+                <p>This feature is currently under development. You'll be able to:</p>
+                <ul>
+                  <li>Install third-party plugins</li>
+                  <li>Connect to external APIs</li>
+                  <li>Automate workflows</li>
+                  <li>Create custom integrations</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'split-view' && (
-          <div className="content-section">
+          <div className="split-view-container">
             <SplitView />
           </div>
         )}
-
-        {/* Agents Tab */}
-        {activeTab === 'agents' && (
-          <div className="agents-container">
-            <h2>🤖 Available AI Agents</h2>
-            <p>Overview of all available AI agents and their capabilities</p>
-
-            <div className="agents-grid">
-              {agents.map(agent => (
-                <div 
-                  key={agent.id} 
-                  className={`agent-card ${selectedAgent === agent.id ? 'selected' : ''}`}
-                  onClick={() => setSelectedAgent(agent.id)}
-                  style={{ borderColor: getAgentColor(agent.id) }}
-                >
-                  <div className="agent-header">
-                    <div className="agent-icon" style={{ color: getAgentColor(agent.id) }}>
-                      {getAgentIcon(agent.id)}
-                    </div>
-                    <div className="agent-info">
-                      <h3>{agent.name}</h3>
-                      <p className="agent-type">{agent.type}</p>
-                    </div>
-                    <div className="agent-status">
-                      <span className={`status-badge ${agent.status}`}>
-                        {agent.status}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="agent-capabilities">
-                    <h4>Capabilities:</h4>
-                    <div className="capabilities-list">
-                      {agent.capabilities.map(cap => (
-                        <span key={cap} className="capability-tag">
-                          {cap}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {agent.model_info && Object.keys(agent.model_info).length > 0 && (
-                    <div className="agent-model-info">
-                      <h4>Model Info:</h4>
-                      <div className="model-info-grid">
-                        {agent.model_info.provider && (
-                          <div className="info-item">
-                            <span>Provider:</span>
-                            <span>{agent.model_info.provider}</span>
-                          </div>
-                        )}
-                        {agent.model_info.context_length && (
-                          <div className="info-item">
-                            <span>Context:</span>
-                            <span>{agent.model_info.context_length.toLocaleString()} tokens</span>
-                          </div>
-                        )}
-                        {agent.model_info.version && (
-                          <div className="info-item">
-                            <span>Version:</span>
-                            <span>{agent.model_info.version}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {agents.length === 0 && (
-              <div className="no-agents">
-                <h3>No agents available</h3>
-                <p>Make sure your backend is running and API keys are configured.</p>
-              </div>
-            )}
-          </div>
-        )}
-      </main>
+      </div>
     </div>
   );
 }

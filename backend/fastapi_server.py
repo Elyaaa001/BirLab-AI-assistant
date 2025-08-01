@@ -11,8 +11,13 @@ import os
 import sys
 import logging
 import asyncio
+import time
+from datetime import datetime
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
+import re
+import math
+from collections import Counter
 
 # Add the parent directory to the path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,12 +28,221 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import uvicorn
 import json
-from datetime import datetime
 
 # Import BirLab AI components
 from multi_agent_system.core.birlab_coordinator import create_birlab_ultra_coordinator, BirLabUltraCoordinator
 from multi_agent_system.core.task import Task, TaskPriority
 from multi_agent_system.connectors.expanded_models import BIRLAB_AI_MODELS, get_all_birlab_ai_models
+
+# Response Analysis Functions
+def analyze_response_quality(text: str) -> float:
+    """
+    Analyze response quality based on multiple factors.
+    Returns a score from 0.0 to 1.0
+    """
+    if not text or len(text.strip()) < 10:
+        return 0.1
+    
+    score = 0.0
+    factors = 0
+    
+    # Length factor (optimal around 100-500 words)
+    word_count = len(text.split())
+    if 50 <= word_count <= 1000:
+        length_score = min(1.0, word_count / 200) * 0.8 if word_count < 200 else 0.8
+        score += length_score
+        factors += 1
+    
+    # Sentence structure variety
+    sentences = re.split(r'[.!?]+', text)
+    sentence_lengths = [len(s.split()) for s in sentences if s.strip()]
+    if sentence_lengths:
+        avg_length = sum(sentence_lengths) / len(sentence_lengths)
+        length_variance = sum((l - avg_length) ** 2 for l in sentence_lengths) / len(sentence_lengths)
+        variety_score = min(1.0, length_variance / 100) * 0.3
+        score += variety_score
+        factors += 1
+    
+    # Vocabulary richness
+    words = re.findall(r'\b\w+\b', text.lower())
+    if words:
+        unique_words = len(set(words))
+        total_words = len(words)
+        richness = unique_words / total_words if total_words > 0 else 0
+        vocab_score = min(1.0, richness * 2) * 0.4
+        score += vocab_score
+        factors += 1
+    
+    # Coherence indicators (transition words, pronouns)
+    coherence_words = ['however', 'therefore', 'furthermore', 'moreover', 'additionally', 
+                      'consequently', 'meanwhile', 'similarly', 'in contrast', 'for example']
+    coherence_count = sum(1 for word in coherence_words if word in text.lower())
+    coherence_score = min(1.0, coherence_count / 5) * 0.3
+    score += coherence_score
+    factors += 1
+    
+    return score / factors if factors > 0 else 0.1
+
+
+def analyze_readability(text: str) -> float:
+    """
+    Calculate readability score using a simplified Flesch Reading Ease formula.
+    Returns a score from 0.0 to 1.0 (higher = more readable)
+    """
+    if not text or len(text.strip()) < 10:
+        return 0.5
+    
+    # Count sentences, words, and syllables
+    sentences = len(re.split(r'[.!?]+', text))
+    words = len(re.findall(r'\b\w+\b', text))
+    
+    if sentences == 0 or words == 0:
+        return 0.5
+    
+    # Simplified syllable counting
+    syllables = 0
+    for word in re.findall(r'\b\w+\b', text.lower()):
+        vowel_groups = len(re.findall(r'[aeiouy]+', word))
+        syllables += max(1, vowel_groups)
+    
+    # Flesch Reading Ease formula (simplified)
+    avg_sentence_length = words / sentences
+    avg_syllables_per_word = syllables / words
+    
+    flesch_score = 206.835 - (1.015 * avg_sentence_length) - (84.6 * avg_syllables_per_word)
+    
+    # Convert to 0-1 scale (90+ = very easy, 0-30 = very difficult)
+    normalized_score = max(0, min(100, flesch_score)) / 100
+    
+    return normalized_score
+
+
+def analyze_sentiment(text: str) -> float:
+    """
+    Simple sentiment analysis based on positive/negative word counts.
+    Returns a score from -1.0 (very negative) to 1.0 (very positive)
+    """
+    if not text:
+        return 0.0
+    
+    # Simple positive/negative word lists
+    positive_words = {
+        'good', 'great', 'excellent', 'amazing', 'wonderful', 'fantastic', 'awesome',
+        'helpful', 'useful', 'beneficial', 'positive', 'successful', 'effective',
+        'happy', 'pleased', 'satisfied', 'delighted', 'impressed', 'glad',
+        'perfect', 'outstanding', 'remarkable', 'brilliant', 'superb'
+    }
+    
+    negative_words = {
+        'bad', 'terrible', 'awful', 'horrible', 'disappointing', 'frustrating',
+        'difficult', 'problematic', 'challenging', 'negative', 'unsuccessful',
+        'ineffective', 'unhappy', 'dissatisfied', 'concerned', 'worried',
+        'poor', 'inadequate', 'insufficient', 'limited', 'confusing'
+    }
+    
+    words = re.findall(r'\b\w+\b', text.lower())
+    positive_count = sum(1 for word in words if word in positive_words)
+    negative_count = sum(1 for word in words if word in negative_words)
+    
+    total_sentiment_words = positive_count + negative_count
+    if total_sentiment_words == 0:
+        return 0.0
+    
+    sentiment_score = (positive_count - negative_count) / len(words) * 10
+    return max(-1.0, min(1.0, sentiment_score))
+
+
+def get_response_statistics(text: str) -> Dict[str, Any]:
+    """
+    Get comprehensive statistics about the response.
+    """
+    if not text:
+        return {
+            'word_count': 0,
+            'char_count': 0,
+            'sentence_count': 0,
+            'paragraph_count': 0,
+            'avg_word_length': 0,
+            'avg_sentence_length': 0
+        }
+    
+    words = re.findall(r'\b\w+\b', text)
+    sentences = re.split(r'[.!?]+', text)
+    paragraphs = text.split('\n\n')
+    
+    return {
+        'word_count': len(words),
+        'char_count': len(text),
+        'sentence_count': len([s for s in sentences if s.strip()]),
+        'paragraph_count': len([p for p in paragraphs if p.strip()]),
+        'avg_word_length': sum(len(word) for word in words) / len(words) if words else 0,
+        'avg_sentence_length': len(words) / len([s for s in sentences if s.strip()]) if sentences else 0,
+        'unique_words': len(set(word.lower() for word in words)),
+        'vocabulary_richness': len(set(word.lower() for word in words)) / len(words) if words else 0
+    }
+
+
+def analyze_response_comprehensive(text: str, response_time: float) -> Dict[str, Any]:
+    """
+    Perform comprehensive analysis of the response.
+    """
+    quality_score = analyze_response_quality(text)
+    readability_score = analyze_readability(text)
+    sentiment_score = analyze_sentiment(text)
+    stats = get_response_statistics(text)
+    
+    # Speed analysis
+    words_per_second = stats['word_count'] / response_time if response_time > 0 else 0
+    chars_per_second = stats['char_count'] / response_time if response_time > 0 else 0
+    
+    # Overall performance score
+    speed_score = min(1.0, words_per_second / 50)  # Normalize based on ~50 words/second being good
+    overall_score = (quality_score * 0.4 + readability_score * 0.3 + speed_score * 0.3)
+    
+    return {
+        'quality_score': round(quality_score, 3),
+        'readability_score': round(readability_score, 3),
+        'sentiment_score': round(sentiment_score, 3),
+        'speed_score': round(speed_score, 3),
+        'overall_score': round(overall_score, 3),
+        'words_per_second': round(words_per_second, 2),
+        'chars_per_second': round(chars_per_second, 2),
+        'statistics': stats,
+        'performance_category': get_performance_category(overall_score),
+        'recommendations': get_improvement_recommendations(quality_score, readability_score, speed_score)
+    }
+
+
+def get_performance_category(score: float) -> str:
+    """Categorize performance based on overall score."""
+    if score >= 0.8:
+        return "Excellent"
+    elif score >= 0.6:
+        return "Good"
+    elif score >= 0.4:
+        return "Average"
+    elif score >= 0.2:
+        return "Below Average"
+    else:
+        return "Poor"
+
+
+def get_improvement_recommendations(quality: float, readability: float, speed: float) -> List[str]:
+    """Provide recommendations for improvement."""
+    recommendations = []
+    
+    if quality < 0.5:
+        recommendations.append("Consider providing more detailed and structured responses")
+    if readability < 0.5:
+        recommendations.append("Try using simpler language and shorter sentences")
+    if speed < 0.3:
+        recommendations.append("Response generation could be optimized for faster delivery")
+    
+    if not recommendations:
+        recommendations.append("Response quality is good across all metrics")
+    
+    return recommendations
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -52,6 +266,14 @@ class ChatResponse(BaseModel):
     agent_used: str
     timestamp: str
     model_info: Optional[Dict[str, Any]] = None
+    # Response Analysis Metrics
+    response_time: float = 0.0
+    response_length_words: int = 0
+    response_length_chars: int = 0
+    quality_score: float = 0.0
+    readability_score: float = 0.0
+    sentiment_score: float = 0.0
+    analysis: Optional[Dict[str, Any]] = None
 
 
 class SplitViewRequest(BaseModel):
@@ -132,7 +354,7 @@ async def lifespan(app: FastAPI):
 # FastAPI app
 app = FastAPI(
     title="🌟 BirLab AI API",
-    description="Production-ready API for 100+ AI models with intelligent coordination",
+    description="Production-ready API for 100+ models with intelligent coordination",
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -252,7 +474,7 @@ async def system_status() -> SystemStatus:
 
 @app.post("/chat")
 async def chat(request: ChatMessage) -> ChatResponse:
-    """Chat with an AI agent (with intelligent selection)"""
+    """Chat with an AI agent (with intelligent selection and response analysis)"""
     if not coordinator:
         raise HTTPException(status_code=503, detail="BirLab AI coordinator not available")
     
@@ -276,19 +498,37 @@ async def chat(request: ChatMessage) -> ChatResponse:
             task_type=request.task_type or "chat"
         )
         
-        # Execute task
+        # Execute task with timing
+        start_time = time.time()
         result = await coordinator.execute_task(task, preferred_agent=agent_id)
+        end_time = time.time()
+        response_time = end_time - start_time
+        
+        # Handle failed task results
+        if not result.success or result.result is None:
+            error_msg = result.error_message or "Agent failed to generate response"
+            raise HTTPException(status_code=500, detail=f"Chat failed: {error_msg}")
         
         # Get model info
         model_info = None
         if agent_id in available_agents:
             model_info = available_agents[agent_id]
         
+        # Perform comprehensive response analysis
+        analysis = analyze_response_comprehensive(result.result, response_time)
+        
         return ChatResponse(
             response=result.result,
             agent_used=agent_id,
             timestamp=datetime.now().isoformat(),
-            model_info=model_info
+            model_info=model_info,
+            response_time=response_time,
+            response_length_words=analysis['statistics']['word_count'],
+            response_length_chars=analysis['statistics']['char_count'],
+            quality_score=analysis['quality_score'],
+            readability_score=analysis['readability_score'],
+            sentiment_score=analysis['sentiment_score'],
+            analysis=analysis
         )
         
     except Exception as e:
